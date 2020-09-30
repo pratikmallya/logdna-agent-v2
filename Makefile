@@ -20,6 +20,7 @@ SHELLCHECK_IMAGE := $(SHELLCHECK_IMAGE)
 WORKDIR :=/build
 DOCKER := DOCKER_BUILDKIT=1 docker
 DOCKER_DISPATCH := ./docker/dispatch.sh "$(WORKDIR)" "$(shell pwd):/build:Z"
+DOCKER_JOURNALD_DISPATCH := ./docker/journald_dispatch.sh "$(WORKDIR)" "$(shell pwd):/build:Z"
 DOCKER_PRIVATE_IMAGE := us.gcr.io/logdna-k8s/logdna-agent-v2
 DOCKER_PUBLIC_IMAGE := docker.io/logdna/logdna-agent
 DOCKER_IBM_IMAGE := icr.io/ext/logdna-agent
@@ -73,12 +74,16 @@ build-release: ## Build a release version of the agent
 	$(RUST_COMMAND) "--env RUST_BACKTRACE=full" "cargo build --release && strip ./target/release/logdna-agent"
 
 .PHONY:test
-test: ## Run unit tests
+test: test-journald ## Runs all the tests
 	$(RUST_COMMAND) "--env RUST_BACKTRACE=full" "cargo test"
 
 .PHONY:integration-test
 integration-test: ## Run integration tests
 	$(RUST_COMMAND) "--env LOGDNA_INGESTION_KEY=$(LOGDNA_INGESTION_KEY) --env LOGDNA_HOST=$(LOGDNA_HOST) --env RUST_BACKTRACE=full" "cargo test --manifest-path bin/Cargo.toml --features integration_tests -- --nocapture"
+
+.PHONY:test-journald
+test-journald: ## Run journald unit tests
+	$(DOCKER_JOURNALD_DISPATCH) "--env RUST_BACKTRACE=full" "cargo test --manifest-path bin/Cargo.toml -p journald --features journald_tests -- --nocapture"
 
 .PHONY:clean
 clean: ## Clean all artifacts from the build process
@@ -111,7 +116,9 @@ lint-docker: ## Lint the Dockerfile for issues
 
 .PHONY:lint-shell
 lint-shell: ## Lint the Dockerfile for issues
+	$(SHELLCHECK_COMMAND) "" "shellcheck docker/lib.sh"
 	$(SHELLCHECK_COMMAND) "" "shellcheck docker/dispatch.sh"
+	$(SHELLCHECK_COMMAND) "" "shellcheck docker/journald_dispatch.sh"
 
 .PHONY:lint
 lint: lint-docker lint-shell lint-format lint-clippy lint-audit ## Runs all the linters
