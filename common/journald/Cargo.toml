@@ -7,9 +7,10 @@ edition = "2018"
 [dependencies]
 #local
 
-systemd = { package = "systemd", version = "~0.4", optional = true }
+systemd = { git = "https://github.com/c-nixon/rust-systemd", branch = "journalref-asrawfd" }
+tokio = { package = "tokio", version = "0.2", features = ["io-driver", "rt-threaded", "macros"] }
+futures = "0.3"
 log = "0.4"
-
-[features]
-default = []
-use_systemd = ["systemd"]
+mio = { version = "0.6" }
+http = { package = "http", path = "../http" }
+chrono = "0.4"

@@ -1,17 +1,25 @@
-extern crate log;
-
-#[cfg(use_systemd)]
 pub mod source {
     #[macro_use]
-    use std::time::UNIX_EPOCH;
-
     use systemd::journal::{Journal, JournalFiles, JournalRecord, JournalSeek};
-
     use http::types::body::LineBuilder;
-
     use chrono::{Local, TimeZone};
 
-    use source::Source;
+    use log::{warn};
+
+    use futures::stream::Stream;
+    use mio::{
+        event::Evented,
+        unix::EventedFd
+    };
+    use std::{
+        io,
+        os::unix::io::{AsRawFd, RawFd},
+        pin::Pin,
+        sync::Arc,
+        task::{Context, Poll},
+        time::UNIX_EPOCH
+    };
+    use tokio::io::PollEvented;
 
     const KEY_TRANSPORT: &str = "_TRANSPORT";
     const KEY_HOSTNAME: &str = "_HOSTNAME";
@@ -32,6 +40,56 @@ pub mod source {
         NoLines,
     }
 
+    pub struct JournaldStream {
+        fd: PollEvented<JournaldFd>,
+        source: JournaldSource,
+    }
+
+    impl JournaldStream {
+        pub fn new(source: JournaldSource) -> io::Result<Self> {
+            Ok(Self {
+                fd: PollEvented::new(JournaldFd::new((&source.reader).as_raw_fd()))?,
+                source
+            })
+        }
+    }
+
+    impl Stream for JournaldStream {
+        type Item = String;
+
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+            match self.as_mut().source.process_next_record() {
+                RecordStatus::Line(line) => Poll::Ready(Some(line)),
+                _ => {
+                    self.as_mut().fd.clear_read_ready(cx, mio::Ready::readable()).expect("Unable to clear journald readiness bits");
+                    Poll::Pending
+                },
+            }
+        }
+    }
+
+    struct JournaldFd(Arc<RawFd>);
+
+    impl JournaldFd {
+        fn new(fd: RawFd) -> Self {
+            Self(Arc::new(fd))
+        }
+    }
+
+    impl Evented for JournaldFd {
+        fn register(&self, poll: &mio::Poll, token: mio::Token, interest: mio::Ready, opts: mio::PollOpt) -> io::Result<()> {
+            EventedFd(&self.0).register(poll, token, interest, opts)
+        }
+
+        fn reregister(&self, poll: &mio::Poll, token: mio::Token, interest: mio::Ready, opts: mio::PollOpt) -> io::Result<()> {
+            EventedFd(&self.0).reregister(poll, token, interest, opts)
+        }
+
+        fn deregister(&self, poll: &mio::Poll) -> io::Result<()> {
+            EventedFd(&self.0).deregister(poll)
+        }
+    }
+
     pub struct JournaldSource {
         reader: Journal,
     }
@@ -47,8 +105,12 @@ pub mod source {
             JournaldSource { reader }
         }
 
+        pub fn into_stream(self) -> io::Result<JournaldStream> {
+            Ok(JournaldStream::new(self)?)
+        }
+
         fn process_next_record(&mut self) -> RecordStatus {
-            let record = match self.reader.next_record() {
+            let record = match self.reader.next_entry() {
                 Ok(Some(record)) => record,
                 Ok(None) => return RecordStatus::NoLines,
                 Err(e) => panic!("Unable to read next record from journald: {}", e),
@@ -188,16 +250,20 @@ pub mod source {
             RecordStatus::Line(format!("{} {} kernel: {}", timestamp, hostname, message))
         }
     }
+}
 
-    impl<'a> Source<'a> for JournaldSource {
-        fn drain(&mut self, callback: &mut Box<dyn FnMut(Vec<LineBuilder>) + 'a>) {
-            loop {
-                match self.process_next_record() {
-                    RecordStatus::Line(line) => callback(vec![LineBuilder::new().line(line)]),
-                    RecordStatus::BadLine => continue,
-                    RecordStatus::NoLines => break,
-                };
-            }
+mod tests {
+    use super::source::JournaldSource;
+
+    use futures::stream::StreamExt;
+    use tokio;
+
+    #[tokio::test]
+    async fn source_works() {
+        let source = JournaldSource::new();
+        let mut stream = source.into_stream().unwrap();
+        while let Some(line) = stream.next().await {
+            println!("{}", line);
         }
     }
 }
