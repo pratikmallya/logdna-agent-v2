@@ -1,26 +1,24 @@
 pub mod source {
     #[macro_use]
     use systemd::journal::{Journal, JournalFiles, JournalRecord, JournalSeek};
-    use http::types::body::LineBuilder;
     use chrono::{Local, TimeZone};
-    use std::path::Path;
 
     use log::{warn};
 
     use futures::stream::Stream;
-    use mio::{
-        event::Evented,
-        unix::EventedFd
-    };
     use std::{
         io,
-        os::unix::io::{AsRawFd, RawFd},
+        path::Path,
         pin::Pin,
-        sync::Arc,
-        task::{Context, Poll},
-        time::UNIX_EPOCH
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+            Mutex,
+        },
+        task::{Context, Poll, Waker},
+        thread::{self, JoinHandle},
+        time::UNIX_EPOCH,
     };
-    use tokio::io::PollEvented;
 
     const KEY_TRANSPORT: &str = "_TRANSPORT";
     const KEY_HOSTNAME: &str = "_HOSTNAME";
@@ -41,16 +39,60 @@ pub mod source {
         NoLines,
     }
 
+    pub struct SharedState {
+        line: Option<String>,
+        waker: Option<Waker>,
+    }
+
     pub struct JournaldStream {
-        fd: PollEvented<JournaldFd>,
-        source: JournaldSource,
+        thread: JoinHandle<()>,
+        shared_state: Arc<Mutex<SharedState>>,
+        flag: Arc<AtomicBool>
     }
 
     impl JournaldStream {
-        pub fn new(source: JournaldSource) -> io::Result<Self> {
+        pub fn new() -> io::Result<Self> {
+            let shared_state = Arc::new(Mutex::new(SharedState {
+                line: None,
+                waker: None,
+            }));
+
+            let flag = Arc::new(AtomicBool::new(false));
+            let thread_flag = Arc::clone(&flag);
+            let thread_shared_state = shared_state.clone();
+            let thread = thread::spawn(move || {
+                println!("Start journald stream side thread");
+                let mut journal = JournaldSource::new();
+
+                loop {
+                    while !thread_flag.load(Ordering::Acquire) {
+                        println!("Parking journald side thread");
+                        thread::park();
+                    }
+                    println!("Releasing journald side thread");
+
+                    loop {
+                        if let RecordStatus::Line(line) = journal.process_next_record() {
+                            println!("Journald side thread pulled out some data");
+                            let mut shared_state = thread_shared_state.lock().unwrap();
+                            shared_state.line = Some(line);
+                            thread_flag.store(false, Ordering::Release);
+                            if let Some(waker) = shared_state.waker.take() {
+                                waker.wake()
+                            }
+                            break;
+                        } else {
+                            println!("Journald side thread found nothing - waiting for more data");
+                            journal.reader.wait(None);
+                        }
+                    }
+                }
+            });
+
             Ok(Self {
-                fd: PollEvented::new(JournaldFd::new((&source.reader).as_raw_fd()))?,
-                source
+                thread,
+                shared_state,
+                flag,
             })
         }
     }
@@ -59,37 +101,20 @@ pub mod source {
         type Item = String;
 
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+            let self_ = self.as_mut();
+            let mut shared_state = self_.shared_state.lock().unwrap();
+
             println!("Polling journald for some data");
-            match self.as_mut().source.process_next_record() {
-                RecordStatus::Line(line) => Poll::Ready(Some(line)),
-                _ => {
-                    println!("Nothing found, waiting for more data");
-                    self.as_ref().fd.clear_read_ready(cx, mio::Ready::readable()).expect("Unable to clear journald readiness bits");
-                    Poll::Pending
-                },
+            if let Some(line) = shared_state.line.take() {
+                return Poll::Ready(Some(line));
             }
-        }
-    }
 
-    struct JournaldFd(Arc<RawFd>);
+            println!("Nothing found, waiting for more data");
+            shared_state.waker = Some(cx.waker().clone());
+            self_.flag.store(true, Ordering::Release);
+            self_.thread.thread().unpark();
 
-    impl JournaldFd {
-        fn new(fd: RawFd) -> Self {
-            Self(Arc::new(fd))
-        }
-    }
-
-    impl Evented for JournaldFd {
-        fn register(&self, poll: &mio::Poll, token: mio::Token, interest: mio::Ready, opts: mio::PollOpt) -> io::Result<()> {
-            EventedFd(&self.0).register(poll, token, interest, opts)
-        }
-
-        fn reregister(&self, poll: &mio::Poll, token: mio::Token, interest: mio::Ready, opts: mio::PollOpt) -> io::Result<()> {
-            EventedFd(&self.0).reregister(poll, token, interest, opts)
-        }
-
-        fn deregister(&self, poll: &mio::Poll) -> io::Result<()> {
-            EventedFd(&self.0).deregister(poll)
+            Poll::Pending
         }
     }
 
@@ -106,10 +131,6 @@ pub mod source {
                 .expect("Could not seek to tail of journald logs");
 
             JournaldSource { reader }
-        }
-
-        pub fn into_stream(self) -> io::Result<JournaldStream> {
-            Ok(JournaldStream::new(self)?)
         }
 
         pub fn process_next_record(&mut self) -> RecordStatus {

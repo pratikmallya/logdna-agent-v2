@@ -9,7 +9,7 @@ use env_logger::Env;
 use fs::tail::Tailer as FSSource;
 use futures::StreamExt;
 use http::client::Client;
-use journald::source::{JournaldSource, RecordStatus};
+use journald::source::{JournaldSource, RecordStatus, JournaldStream};
 use k8s::middleware::K8sMetadata;
 use metrics::Metrics;
 use middleware::Executor;
