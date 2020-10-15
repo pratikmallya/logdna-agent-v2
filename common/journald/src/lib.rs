@@ -3,6 +3,7 @@ pub mod source {
     use systemd::journal::{Journal, JournalFiles, JournalRecord, JournalSeek};
     use http::types::body::LineBuilder;
     use chrono::{Local, TimeZone};
+    use std::path::Path;
 
     use log::{warn};
 
@@ -34,7 +35,7 @@ pub mod source {
     const TRANSPORT_STDOUT: &str = "stdout";
     const TRANSPORT_KERNEL: &str = "kernel";
 
-    enum RecordStatus {
+    pub enum RecordStatus {
         Line(String),
         BadLine,
         NoLines,
@@ -58,10 +59,12 @@ pub mod source {
         type Item = String;
 
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+            println!("Polling journald for some data");
             match self.as_mut().source.process_next_record() {
                 RecordStatus::Line(line) => Poll::Ready(Some(line)),
                 _ => {
-                    self.as_mut().fd.clear_read_ready(cx, mio::Ready::readable()).expect("Unable to clear journald readiness bits");
+                    println!("Nothing found, waiting for more data");
+                    self.as_ref().fd.clear_read_ready(cx, mio::Ready::readable()).expect("Unable to clear journald readiness bits");
                     Poll::Pending
                 },
             }
@@ -96,7 +99,7 @@ pub mod source {
 
     impl JournaldSource {
         pub fn new() -> JournaldSource {
-            let mut reader = Journal::open(JournalFiles::All, false, false)
+            let mut reader = Journal::open_directory(&Path::new("/var/log/journal"), JournalFiles::All, false)
                 .expect("Could not open journald reader");
             reader
                 .seek(JournalSeek::Tail)
@@ -109,7 +112,7 @@ pub mod source {
             Ok(JournaldStream::new(self)?)
         }
 
-        fn process_next_record(&mut self) -> RecordStatus {
+        pub fn process_next_record(&mut self) -> RecordStatus {
             let record = match self.reader.next_entry() {
                 Ok(Some(record)) => record,
                 Ok(None) => return RecordStatus::NoLines,
