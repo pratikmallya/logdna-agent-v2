@@ -8,7 +8,7 @@ edition = "2018"
 #local
 
 systemd = { git = "https://github.com/jmesmon/rust-systemd" }
-tokio = { package = "tokio", version = "0.2", features = ["io-driver", "rt-threaded", "macros"] }
+tokio = { package = "tokio", version = "0.2", features = ["sync", "rt-threaded", "macros"] }
 futures = "0.3"
 log = "0.4"
 mio = { version = "0.6" }

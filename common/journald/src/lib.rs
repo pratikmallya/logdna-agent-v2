@@ -11,8 +11,8 @@ pub mod source {
         path::Path,
         pin::Pin,
         sync::{
+            mpsc::{sync_channel, Sender, Receiver},
             Arc,
-            atomic::{AtomicBool, Ordering},
             Mutex,
         },
         task::{Context, Poll, Waker},
@@ -39,60 +39,47 @@ pub mod source {
         NoLines,
     }
 
-    pub struct SharedState {
-        line: Option<String>,
+    struct SharedState {
         waker: Option<Waker>,
     }
 
     pub struct JournaldStream {
-        thread: JoinHandle<()>,
+        thread: Option<JoinHandle<()>>,
+        receiver: Receiver<String>,
         shared_state: Arc<Mutex<SharedState>>,
-        flag: Arc<AtomicBool>
     }
 
     impl JournaldStream {
         pub fn new() -> io::Result<Self> {
+            let (sender, receiver) = sync_channel(100);
+
             let shared_state = Arc::new(Mutex::new(SharedState {
-                line: None,
                 waker: None,
             }));
 
-            let flag = Arc::new(AtomicBool::new(false));
-            let thread_flag = Arc::clone(&flag);
             let thread_shared_state = shared_state.clone();
-            let thread = thread::spawn(move || {
+            let thread = Some(thread::spawn(move || {
                 println!("Start journald stream side thread");
                 let mut journal = JournaldSource::new();
 
                 loop {
-                    while !thread_flag.load(Ordering::Acquire) {
-                        println!("Parking journald side thread");
-                        thread::park();
-                    }
-                    println!("Releasing journald side thread");
-
-                    loop {
-                        if let RecordStatus::Line(line) = journal.process_next_record() {
-                            println!("Journald side thread pulled out some data");
-                            let mut shared_state = thread_shared_state.lock().unwrap();
-                            shared_state.line = Some(line);
-                            thread_flag.store(false, Ordering::Release);
-                            if let Some(waker) = shared_state.waker.take() {
-                                waker.wake()
-                            }
-                            break;
-                        } else {
-                            println!("Journald side thread found nothing - waiting for more data");
-                            journal.reader.wait(None);
+                    if let RecordStatus::Line(line) = journal.process_next_record() {
+                        println!("Journald side thread pulled out some data");
+                        sender.send(line).expect("Unable to communicate from journald stream thread worker to main stream");
+                        if let Some(waker) = thread_shared_state.lock().unwrap().waker.take() {
+                            waker.wake()
                         }
+                    } else {
+                        println!("Journald side thread found nothing - waiting for more data");
+                        journal.reader.wait(None);
                     }
                 }
-            });
+            }));
 
             Ok(Self {
                 thread,
+                receiver,
                 shared_state,
-                flag,
             })
         }
     }
@@ -105,16 +92,22 @@ pub mod source {
             let mut shared_state = self_.shared_state.lock().unwrap();
 
             println!("Polling journald for some data");
-            if let Some(line) = shared_state.line.take() {
+            if let Ok(line) = self_.receiver.try_recv() {
                 return Poll::Ready(Some(line));
             }
 
             println!("Nothing found, waiting for more data");
             shared_state.waker = Some(cx.waker().clone());
-            self_.flag.store(true, Ordering::Release);
-            self_.thread.thread().unpark();
 
             Poll::Pending
+        }
+    }
+
+    impl Drop for JournaldStream {
+        fn drop(&mut self) {
+            if let Some(thread) = self.thread.take() {
+                thread.join();
+            }
         }
     }
 
