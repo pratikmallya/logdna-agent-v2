@@ -70,7 +70,7 @@ fn main() {
     executor.init();
 
     let mut fs_tailer_buf = [0u8; 4096];
-    let mut fs_source = FSSource::new(config.log.dirs, config.log.rules);
+    let mut fs_source = FSSource::new(config.log.dirs, config.log.rules, config.log.lookback);
     // Create the runtime
     let mut rt = Runtime::new().unwrap();
 

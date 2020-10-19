@@ -73,6 +73,10 @@ pub struct Config {
     #[env(LOGDNA_INCLUSION_REGEX_RULES, LOGDNA_INCLUDE_REGEX)]
     #[example("/var/log/.*,/var/data/.*")]
     pub inclusion_regex_rules: Option<EnvList<String>>,
+
+    #[env(LOGDNA_LOOKBACK)]
+    #[example("none")]
+    pub lookback: Option<String>,
 }
 
 impl Config {
@@ -193,6 +197,10 @@ impl Config {
                     raw.log.include = Some(rules);
                 }
             }
+        }
+
+        if self.lookback.is_some() {
+            raw.log.lookback = self.lookback;
         }
 
         raw

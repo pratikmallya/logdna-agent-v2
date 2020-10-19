@@ -11,6 +11,7 @@ use std::time::Duration;
 use flate2::Compression;
 
 use fs::rule::{GlobRule, RegexRule, Rules};
+use fs::tail::Lookback;
 use http::types::request::{Encoding, RequestTemplate, Schema};
 
 use crate::env::Config as EnvConfig;
@@ -44,6 +45,7 @@ pub struct HttpConfig {
 pub struct LogConfig {
     pub dirs: Vec<PathBuf>,
     pub rules: Rules,
+    pub lookback: Lookback,
 }
 
 impl Config {
@@ -169,6 +171,11 @@ impl TryFrom<RawConfig> for Config {
         let mut log = LogConfig {
             dirs: raw.log.dirs.into_iter().collect(),
             rules: Rules::new(),
+            lookback: raw
+                .log
+                .lookback
+                .map(|s| s.parse::<Lookback>())
+                .unwrap_or(Ok(Lookback::None))?,
         };
 
         if let Some(rules) = raw.log.include {

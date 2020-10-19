@@ -11,15 +11,43 @@ use std::sync::{Arc, Mutex};
 
 use futures::{Stream, StreamExt};
 
+use thiserror::Error;
+
+#[derive(Clone, std::fmt::Debug)]
+pub enum Lookback {
+    Start,
+    None,
+}
+
+#[derive(Error, Debug)]
+pub enum ParseLookbackError {
+    #[error("Unknown lookback strategy: {0}")]
+    Unknown(String),
+}
+
+impl std::str::FromStr for Lookback {
+    type Err = ParseLookbackError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "start" => Ok(Lookback::Start),
+            "none" => Ok(Lookback::None),
+            _ => Err(ParseLookbackError::Unknown(s.into())),
+        }
+    }
+}
+
 /// Tails files on a filesystem by inheriting events from a Watcher
 pub struct Tailer {
+    lookback_config: Lookback,
     fs_cache: Arc<Mutex<FileSystem<u64>>>,
 }
 
 impl Tailer {
     /// Creates new instance of Tailer
-    pub fn new(watched_dirs: Vec<PathBuf>, rules: Rules) -> Self {
+    pub fn new(watched_dirs: Vec<PathBuf>, rules: Rules, lookback_config: Lookback) -> Self {
         Self {
+            lookback_config,
             fs_cache: Arc::new(Mutex::new(FileSystem::new(watched_dirs, rules))),
         }
     }
@@ -41,6 +69,7 @@ impl Tailer {
 
         Ok(events.map({
             let fs = self.fs_cache.clone();
+            let lookback_config = self.lookback_config.clone();
             move |event| {
             let mut final_lines = Vec::new();
 
@@ -52,12 +81,17 @@ impl Tailer {
                     let path = fs.resolve_direct_path(entry);
 
                     if let Entry::File { ref mut data, .. } = entry {
-                        let mut len = path.metadata().map(|m| m.len()).unwrap_or(0);
+                        *data = match lookback_config {
+                            Lookback::Start => 0,
+                            Lookback::None => {
+                         let mut len = path.metadata().map(|m| m.len()).unwrap_or(0);
                         if len < 8192 {
                             len = 0
                         }
                         info!("initialized {:?} with offset {}", path, len,);
-                        *data = len;
+                               len
+                            }
+                        }
                     }
                 }
                 Event::New(mut entry_ptr) => {
