@@ -1,17 +1,17 @@
 pub mod source {
-    #[macro_use]
     use systemd::journal::{Journal, JournalFiles, JournalRecord, JournalSeek};
     use chrono::{Local, TimeZone};
+    use http::types::body::LineBuilder;
 
     use log::{warn};
 
     use futures::stream::Stream;
     use std::{
-        io,
-        path::Path,
+        mem::drop,
+        path::{Path, PathBuf},
         pin::Pin,
         sync::{
-            mpsc::{sync_channel, Sender, Receiver},
+            mpsc::{sync_channel, Receiver, TryRecvError},
             Arc,
             Mutex,
         },
@@ -33,81 +33,155 @@ pub mod source {
     const TRANSPORT_STDOUT: &str = "stdout";
     const TRANSPORT_KERNEL: &str = "kernel";
 
+    #[derive(Clone)]
+    pub enum JournalPath {
+        Directory(PathBuf),
+        Files(Vec<PathBuf>),
+    }
+
     pub enum RecordStatus {
-        Line(String),
+        Line(LineBuilder),
         BadLine,
         NoLines,
     }
 
     struct SharedState {
         waker: Option<Waker>,
+        counter: u8,
     }
 
     pub struct JournaldStream {
         thread: Option<JoinHandle<()>>,
-        receiver: Receiver<String>,
+        receiver: Option<Receiver<LineBuilder>>,
         shared_state: Arc<Mutex<SharedState>>,
+        path: JournalPath,
     }
 
     impl JournaldStream {
-        pub fn new() -> io::Result<Self> {
+        pub fn new(path: JournalPath) -> Self {
+            let mut stream = Self {
+                thread: None,
+                receiver: None,
+                shared_state: Arc::new(Mutex::new(SharedState {
+                    waker: None,
+                    counter: 0,
+                })),
+                path,
+            };
+
+            stream.spawn_thread();
+            stream
+        }
+
+        fn spawn_thread(&mut self) {
+            self.drop_thread();
+
             let (sender, receiver) = sync_channel(100);
-
-            let shared_state = Arc::new(Mutex::new(SharedState {
-                waker: None,
-            }));
-
-            let thread_shared_state = shared_state.clone();
-            let thread = Some(thread::spawn(move || {
-                println!("Start journald stream side thread");
-                let mut journal = JournaldSource::new();
+            let thread_shared_state = self.shared_state.clone();
+            let path = self.path.clone();
+            let thread = thread::spawn(move || {
+                let mut journal = JournaldSource::new(path);
 
                 loop {
                     if let RecordStatus::Line(line) = journal.process_next_record() {
-                        println!("Journald side thread pulled out some data");
-                        sender.send(line).expect("Unable to communicate from journald stream thread worker to main stream");
-                        if let Some(waker) = thread_shared_state.lock().unwrap().waker.take() {
-                            waker.wake()
+                        if let Err(e) = sender.send(line) {
+                            warn!("journald's worker thread unable to communicate with main thread: {}", e);
+                            break;
+                        }
+
+                        let mut shared_state = match thread_shared_state.lock() {
+                            Ok(shared_state) => shared_state,
+                            Err(e) => {
+                                // we can't wake up the stream so it will hang indefinitely; need
+                                // to panic here
+                                panic!("journald's worker thread unable to access shared state: {:?}", e);
+                            }
+                        };
+
+                        shared_state.counter += 1;
+                        if shared_state.counter > 10 {
+                            shared_state.counter = 0;
+                            warn!("TEST: panic journald worker thread every 10 messages");
+                            break;
+                        }
+
+                        if let Some(waker) = shared_state.waker.take() {
+                            waker.wake();
                         }
                     } else {
-                        println!("Journald side thread found nothing - waiting for more data");
-                        journal.reader.wait(None);
+                        match journal.reader.wait(None) {
+                            Err(e) => {
+                                warn!("journald's worker thread unable to poll journald for next record: {}", e);
+                                break;
+                            },
+                            _ => {}
+                        };
                     }
                 }
-            }));
 
-            Ok(Self {
-                thread,
-                receiver,
-                shared_state,
-            })
+                // some sort of error has occurred
+                let mut shared_state = match thread_shared_state.lock() {
+                    Ok(shared_state) => shared_state,
+                    Err(e) => {
+                        // we can't wake up the stream so it will hang indefinitely; need
+                        // to panic here
+                        panic!("journald's worker thread unable to access shared state: {:?}", e);
+                    }
+                };
+
+                // explicitly drop the sender before waking up the stream to prevent a race
+                // condition for checking the receiver for disconnect errors
+                drop(sender);
+                if let Some(waker) = shared_state.waker.take() {
+                    waker.wake();
+                }
+            });
+
+            self.thread = Some(thread);
+            self.receiver = Some(receiver);
+        }
+
+        fn drop_thread(&mut self) {
+            if let Some(thread) = self.thread.take() {
+                if let Err(e) = thread.join() {
+                    warn!("unable to join journald's worker thread: {:?}", e)
+                }
+            }
         }
     }
 
     impl Stream for JournaldStream {
-        type Item = String;
+        type Item = Vec<LineBuilder>;
 
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-            let self_ = self.as_mut();
-            let mut shared_state = self_.shared_state.lock().unwrap();
+            let mut self_ = self.as_mut();
 
-            println!("Polling journald for some data");
-            if let Ok(line) = self_.receiver.try_recv() {
-                return Poll::Ready(Some(line));
+            if let Some(ref receiver) = self_.receiver {
+                match receiver.try_recv() {
+                    Ok(line) => {
+                        return Poll::Ready(Some(vec![line]));
+                    },
+                    Err(TryRecvError::Disconnected) => {
+                        warn!("journald's main thread unable to read from worker thread, restarting worker thread...");
+                        self_.drop_thread();
+                        self_.spawn_thread();
+                    },
+                    _ => {}
+                }
+            } else {
+                warn!("journald's main thread missing connection to worker thread, shutting down stream");
+                return Poll::Ready(None);
             }
 
-            println!("Nothing found, waiting for more data");
+            let mut shared_state = self_.shared_state.lock().unwrap();
             shared_state.waker = Some(cx.waker().clone());
-
             Poll::Pending
         }
     }
 
     impl Drop for JournaldStream {
         fn drop(&mut self) {
-            if let Some(thread) = self.thread.take() {
-                thread.join();
-            }
+            self.drop_thread();
         }
     }
 
@@ -116,9 +190,18 @@ pub mod source {
     }
 
     impl JournaldSource {
-        pub fn new() -> JournaldSource {
-            let mut reader = Journal::open_directory(&Path::new("/var/log/journal"), JournalFiles::All, false)
-                .expect("Could not open journald reader");
+        pub fn new(path: JournalPath) -> JournaldSource {
+            let mut reader = match path {
+                JournalPath::Directory(path) => {
+                    Journal::open_directory(&path, JournalFiles::All, false)
+                        .expect("Could not open journald reader for directory")
+                },
+                JournalPath::Files(paths) => {
+                    let paths: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+                    Journal::open_files(&paths)
+                        .expect("Could not open journald reader for paths")
+                },
+            };
             reader
                 .seek(JournalSeek::Tail)
                 .expect("Could not seek to tail of journald logs");
@@ -197,10 +280,12 @@ pub mod source {
                 }
             };
 
-            RecordStatus::Line(format!(
-                "{} {} audit[{}]: {}",
-                timestamp, hostname, pid, message
-            ))
+            RecordStatus::Line(LineBuilder::new().line(
+                format!(
+                    "{} {} audit[{}]: {}",
+                    timestamp, hostname, pid, message
+                )).file(hostname)
+            )
         }
 
         fn process_default_record(
@@ -241,10 +326,12 @@ pub mod source {
                 }
             };
 
-            RecordStatus::Line(format!(
-                "{} {} {}[{}]: {}",
-                timestamp, hostname, comm, pid, message
-            ))
+            RecordStatus::Line(LineBuilder::new().line(
+                format!(
+                    "{} {} {}[{}]: {}",
+                    timestamp, hostname, comm, pid, message
+                )).file(hostname)
+            )
         }
 
         fn process_kernel_record(&self, record: &JournalRecord, timestamp: String) -> RecordStatus {
@@ -264,15 +351,14 @@ pub mod source {
                 }
             };
 
-            RecordStatus::Line(format!("{} {} kernel: {}", timestamp, hostname, message))
+            RecordStatus::Line(LineBuilder::new().line(
+                format!("{} {} kernel: {}", timestamp, hostname, message)).file(hostname)
+            )
         }
     }
 }
 
 mod tests {
-    use super::source::JournaldSource;
-
-    use futures::stream::StreamExt;
     use tokio;
 
     #[tokio::test]
