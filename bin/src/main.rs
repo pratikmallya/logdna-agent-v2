@@ -7,7 +7,7 @@ use std::thread::spawn;
 use config::Config;
 use env_logger::Env;
 use fs::tail::Tailer as FSSource;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use http::client::Client;
 use journald::source::{JournaldStream, JournalPath};
 use k8s::middleware::K8sMetadata;
@@ -64,16 +64,16 @@ fn main() {
     let mut fs_tailer_buf = [0u8; 4096];
     let mut fs_source = FSSource::new(config.log.dirs, config.log.rules);
     // let journald_source = Either::Left(JournaldStream::new());
-    let mut journal_files = Vec::new();
+    let mut journal_files: Vec<PathBuf> = Vec::new();
     let mut journal_directories: Vec<PathBuf> = Vec::new();
     for path in config.journald.paths {
         if path.is_dir() {
             journal_directories.push(path);
         } else if path.is_file() {
-            journal_directories.push(path);
+            journal_files.push(path);
         }
     }
-    let journald_sources = journal_directories.into_iter().map(|dir| JournaldStream::new(JournalPath::Directory(dir))).collect();
+    let journald_sources: Vec<JournaldStream> = journal_directories.into_iter().map(|dir| JournaldStream::new(JournalPath::Directory(dir))).collect();
     // Create the runtime
     let mut rt = Runtime::new().unwrap();
 
@@ -85,12 +85,11 @@ fn main() {
             .expect("except Failed to create FS Tailer"));
         pin_mut!(fs_source);
         */
+        let mut journald_source: futures::stream::SelectAll<<Vec<JournaldStream> as IntoIterator>::Item> = futures::stream::select_all(journald_sources);
 
         let mut sources = futures::stream::SelectAll::new();
         //sources.push(&mut fs_source);
-        for source in &mut journald_sources {
-            sources.push(source);
-        }
+        sources.push(&mut journald_source);
 
         sources
             .for_each(|lines| async {
@@ -98,7 +97,7 @@ fn main() {
                     for line in lines {
                         // TODO upgrade to async hyper
                         println!("{:?}", line.line);
-                        client.borrow_mut().send(line)
+                        // client.borrow_mut().send(line)
                     }
                 }
             })
