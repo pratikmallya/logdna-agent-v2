@@ -63,7 +63,6 @@ fn main() {
 
     let mut fs_tailer_buf = [0u8; 4096];
     let mut fs_source = FSSource::new(config.log.dirs, config.log.rules);
-    // let journald_source = Either::Left(JournaldStream::new());
     let mut journal_files: Vec<PathBuf> = Vec::new();
     let mut journal_directories: Vec<PathBuf> = Vec::new();
     for path in config.journald.paths {
@@ -71,24 +70,29 @@ fn main() {
             journal_directories.push(path);
         } else if path.is_file() {
             journal_files.push(path);
+        } else {
+            warn!("unable to monitor journald path \"{:?}\": path does not exist", path);
         }
     }
-    let journald_sources: Vec<JournaldStream> = journal_directories.into_iter().map(|dir| JournaldStream::new(JournalPath::Directory(dir))).collect();
+    let mut journald_sources: Vec<JournaldStream> = journal_directories.into_iter().map(|dir| JournaldStream::new(JournalPath::Directory(dir))).collect();
+    if journal_files.len() > 0 {
+        journald_sources.push(JournaldStream::new(JournalPath::Files(journal_files)));
+    }
     // Create the runtime
     let mut rt = Runtime::new().unwrap();
 
     // Execute the future, blocking the current thread until completion
     rt.block_on(async {
-        /*
-        let fs_source = Either::Right(fs_source
+        let fs_source = Either::Left(fs_source
             .process(&mut fs_tailer_buf)
             .expect("except Failed to create FS Tailer"));
-        pin_mut!(fs_source);
-        */
         let mut journald_source: futures::stream::SelectAll<<Vec<JournaldStream> as IntoIterator>::Item> = futures::stream::select_all(journald_sources);
+        let mut journald_source = Either::Right(journald_source);
+        pin_mut!(fs_source);
+        pin_mut!(journald_source);
 
         let mut sources = futures::stream::SelectAll::new();
-        //sources.push(&mut fs_source);
+        sources.push(&mut fs_source);
         sources.push(&mut journald_source);
 
         sources
@@ -96,8 +100,7 @@ fn main() {
                 if let Some(lines) = executor.process(lines) {
                     for line in lines {
                         // TODO upgrade to async hyper
-                        println!("{:?}", line.line);
-                        // client.borrow_mut().send(line)
+                        client.borrow_mut().send(line)
                     }
                 }
             })

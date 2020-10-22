@@ -47,7 +47,6 @@ pub mod source {
 
     struct SharedState {
         waker: Option<Waker>,
-        counter: u8,
     }
 
     pub struct JournaldStream {
@@ -64,7 +63,6 @@ pub mod source {
                 receiver: None,
                 shared_state: Arc::new(Mutex::new(SharedState {
                     waker: None,
-                    counter: 0,
                 })),
                 path,
             };
@@ -82,6 +80,20 @@ pub mod source {
             let thread = thread::spawn(move || {
                 let mut journal = JournaldSource::new(path);
 
+                let call_waker = || {
+                    let mut shared_state = match thread_shared_state.lock() {
+                        Ok(shared_state) => shared_state,
+                        Err(e) => {
+                            // we can't wake up the stream so it will hang indefinitely; need
+                            // to panic here
+                            panic!("journald's worker thread unable to access shared state: {:?}", e);
+                        }
+                    };
+                    if let Some(waker) = shared_state.waker.take() {
+                        waker.wake();
+                    }
+                };
+
                 loop {
                     if let RecordStatus::Line(line) = journal.process_next_record() {
                         if let Err(e) = sender.send(line) {
@@ -89,25 +101,7 @@ pub mod source {
                             break;
                         }
 
-                        let mut shared_state = match thread_shared_state.lock() {
-                            Ok(shared_state) => shared_state,
-                            Err(e) => {
-                                // we can't wake up the stream so it will hang indefinitely; need
-                                // to panic here
-                                panic!("journald's worker thread unable to access shared state: {:?}", e);
-                            }
-                        };
-
-                        shared_state.counter += 1;
-                        if shared_state.counter > 10 {
-                            shared_state.counter = 0;
-                            warn!("TEST: panic journald worker thread every 10 messages");
-                            break;
-                        }
-
-                        if let Some(waker) = shared_state.waker.take() {
-                            waker.wake();
-                        }
+                        call_waker();
                     } else {
                         match journal.reader.wait(None) {
                             Err(e) => {
@@ -119,22 +113,10 @@ pub mod source {
                     }
                 }
 
-                // some sort of error has occurred
-                let mut shared_state = match thread_shared_state.lock() {
-                    Ok(shared_state) => shared_state,
-                    Err(e) => {
-                        // we can't wake up the stream so it will hang indefinitely; need
-                        // to panic here
-                        panic!("journald's worker thread unable to access shared state: {:?}", e);
-                    }
-                };
-
-                // explicitly drop the sender before waking up the stream to prevent a race
-                // condition for checking the receiver for disconnect errors
+                // some sort of error has occurred. Explicitly drop the sender before waking up the
+                // stream to prevent a race condition
                 drop(sender);
-                if let Some(waker) = shared_state.waker.take() {
-                    waker.wake();
-                }
+                call_waker();
             });
 
             self.thread = Some(thread);

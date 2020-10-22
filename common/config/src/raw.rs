@@ -54,7 +54,7 @@ pub struct LogConfig {
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
 pub struct JournaldConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub paths: Option<Vec<PathBuf>>
+    pub paths: Option<Vec<PathBuf>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Eq, PartialEq, Clone)]
@@ -124,7 +124,7 @@ impl Default for LogConfig {
 impl Default for JournaldConfig {
     fn default() -> Self {
         JournaldConfig {
-            paths: None
+            paths: None,
         }
     }
 }
