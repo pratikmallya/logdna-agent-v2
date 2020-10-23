@@ -143,7 +143,7 @@ impl TryFrom<RawConfig> for Config {
         let mut info = "unknown".to_string();
         if let Ok(sys_info) = sys_info::linux_os_release() {
             info = format!(
-                "{} rv:{}",
+                "{}/{}",
                 sys_info.name.unwrap_or_else(|| "unknown".to_string()),
                 sys_info.version.unwrap_or_else(|| "unknown".to_string()),
             )
