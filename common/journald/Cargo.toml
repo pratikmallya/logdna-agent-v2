@@ -14,3 +14,4 @@ futures = "0.3"
 log = "0.4"
 mio = { version = "0.6" }
 chrono = "0.4"
+crossbeam = "0.8"

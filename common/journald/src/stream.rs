@@ -1,4 +1,5 @@
 use systemd::journal::{Journal, JournalFiles, JournalRecord, JournalSeek};
+use crossbeam::atomic::AtomicCell;
 use chrono::{Local, TimeZone};
 use http::types::body::LineBuilder;
 use metrics::Metrics;
@@ -11,7 +12,6 @@ use std::{
     sync::{
         mpsc::{sync_channel, Receiver, TryRecvError},
         Arc,
-        Mutex,
     },
     task::{Context, Poll, Waker},
     thread::{self, JoinHandle},
@@ -43,14 +43,10 @@ enum RecordStatus {
     NoLines,
 }
 
-struct SharedState {
-    waker: Option<Waker>,
-}
-
 pub struct Stream {
     thread: Option<JoinHandle<()>>,
     receiver: Option<Receiver<LineBuilder>>,
-    shared_state: Arc<Mutex<SharedState>>,
+    shared_state: Arc<AtomicCell<Option<Waker>>>,
     path: Path,
 }
 
@@ -59,9 +55,7 @@ impl Stream {
         let mut stream = Self {
             thread: None,
             receiver: None,
-            shared_state: Arc::new(Mutex::new(SharedState {
-                waker: None,
-            })),
+            shared_state: Arc::new(AtomicCell::new(None)),
             path,
         };
 
@@ -79,15 +73,7 @@ impl Stream {
             let mut journal = Reader::new(path);
 
             let call_waker = || {
-                let mut shared_state = match thread_shared_state.lock() {
-                    Ok(shared_state) => shared_state,
-                    Err(e) => {
-                        // we can't wake up the stream so it will hang indefinitely; need
-                        // to panic here
-                        panic!("journald's worker thread unable to access shared state: {:?}", e);
-                    }
-                };
-                if let Some(waker) = shared_state.waker.take() {
+                if let Some(waker) = thread_shared_state.take() {
                     waker.wake();
                 }
             };
@@ -153,8 +139,7 @@ impl FutureStream for Stream {
             return Poll::Ready(None);
         }
 
-        let mut shared_state = self_.shared_state.lock().unwrap();
-        shared_state.waker = Some(cx.waker().clone());
+        self.shared_state.store(Some(cx.waker().clone()));
         Poll::Pending
     }
 }
