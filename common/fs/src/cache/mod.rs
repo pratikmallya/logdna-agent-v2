@@ -25,6 +25,70 @@ type Children<T> = HashMap<OsString, Box<Entry<T>>>;
 type Symlinks<T> = HashMap<PathBuf, Vec<EntryPtr<T>>>;
 type WatchDescriptors<T> = HashMap<WatchDescriptor, Vec<EntryPtr<T>>>;
 
+mod dir_path {
+    use std::ops::Deref;
+    use std::path::{Path, PathBuf};
+    use thiserror::Error;
+
+    #[derive(Error, std::fmt::Debug)]
+    pub enum DirPathBufError {
+        #[error("{0:?} is not a directory")]
+        NotADirPath(PathBuf),
+        #[error("I/O error: {0}")]
+        Io(#[from] std::io::Error),
+    }
+
+    #[derive(std::fmt::Debug)]
+    pub struct DirPathBuf {
+        inner: PathBuf,
+    }
+
+    impl Deref for DirPathBuf {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.inner
+        }
+    }
+
+    impl std::convert::TryFrom<PathBuf> for DirPathBuf {
+        type Error = DirPathBufError;
+        fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+            if std::fs::canonicalize(&path)?.is_dir() {
+                Ok(DirPathBuf { inner: path })
+            } else {
+                Err(DirPathBufError::NotADirPath(path))
+            }
+        }
+    }
+
+    impl std::convert::TryFrom<&Path> for DirPathBuf {
+        type Error = String;
+        fn try_from(path: &Path) -> Result<Self, Self::Error> {
+            if path.is_dir() {
+                Ok(DirPathBuf { inner: path.into() })
+            } else {
+                path.to_str().map_or_else(
+                    || Err("path is not a directory and cannot be formatted".into()),
+                    |path| Err(format!("{} is not a directory", path)),
+                )
+            }
+        }
+    }
+
+    impl std::convert::AsRef<Path> for DirPathBuf {
+        fn as_ref(&self) -> &Path {
+            &self.inner
+        }
+    }
+
+    impl std::convert::Into<PathBuf> for DirPathBuf {
+        fn into(self) -> PathBuf {
+            self.inner
+        }
+    }
+}
+pub use dir_path::{DirPathBuf, DirPathBufError};
+
 pub struct FileSystem<T>
 where
     T: Clone + std::fmt::Debug,
@@ -45,7 +109,12 @@ impl<'a, T: 'a + Default> FileSystem<T>
 where
     T: Clone + std::fmt::Debug,
 {
-    pub fn new(inital_dirs: Vec<PathBuf>, rules: Rules) -> Self {
+    pub fn new(initial_dirs: Vec<DirPathBuf>, rules: Rules) -> Self {
+        initial_dirs.iter().for_each(|path| {
+            if !path.is_dir() {
+                panic!("initial dirs must be dirs")
+            }
+        });
         let mut watcher = Watcher::new().expect("unable to initialize inotify");
 
         let root = Box::new(Entry::Dir {
@@ -56,8 +125,8 @@ where
         });
 
         let mut initial_dir_rules = Rules::new();
-        for path in inital_dirs.iter() {
-            append_rules(&mut initial_dir_rules, path.clone());
+        for path in initial_dirs.iter() {
+            append_rules(&mut initial_dir_rules, path.as_ref().into());
         }
 
         let mut fs = Self {
@@ -73,8 +142,12 @@ where
         let root = EntryPtr::from(fs.root.deref_mut());
         fs.register(root);
 
-        for dir in inital_dirs.iter() {
-            let mut path_cpy = dir.clone();
+        for dir in initial_dirs
+            .into_iter()
+            .map(|path| -> PathBuf { path.into() })
+        {
+            debug!("processing initial dir {:?}", dir);
+            let mut path_cpy: PathBuf = dir.clone();
             loop {
                 if !path_cpy.exists() {
                     path_cpy.pop();
@@ -84,10 +157,15 @@ where
                 }
             }
 
-            for path in recursive_scan(dir) {
+            for path in recursive_scan(&dir) {
+                debug!("processing initial path {:?} in dir {:?}", path, dir);
                 let mut events = Vec::new();
                 fs.insert(&path, &mut events);
                 for event in events {
+                    debug!(
+                        "found {:?} for initial path {:?} in dir {:?}",
+                        event, path, dir
+                    );
                     match event {
                         Event::New(entry) => fs.initial_events.push(Event::Initialize(entry)),
                         _ => panic!("unexpected event in initialization"),
@@ -936,7 +1014,13 @@ mod tests {
             rules.add_inclusion(GlobRule::new(r"**").unwrap());
             rules
         });
-        FileSystem::new(vec![path], rules)
+        FileSystem::new(
+            vec![path
+                .as_path()
+                .try_into()
+                .expect(&format!("{:?} is not a directory!", path))],
+            rules,
+        )
     }
 
     fn run_test<T: FnOnce() + panic::UnwindSafe>(test: T) {

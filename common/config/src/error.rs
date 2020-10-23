@@ -10,6 +10,7 @@ pub enum ConfigError {
     Template(http::types::error::TemplateError),
     Glob(globber::Error),
     Regex(pcre2::Error),
+    NotADirectory(fs::cache::DirPathBufError),
     Lookback(fs::tail::ParseLookbackError),
 }
 
@@ -30,6 +31,7 @@ impl Display for ConfigError {
             ConfigError::Template(e) => write!(f, "{}", e),
             ConfigError::Glob(e) => write!(f, "{}", e),
             ConfigError::Regex(e) => write!(f, "{}", e),
+            ConfigError::NotADirectory(e) => write!(f, "{}", e),
             ConfigError::Lookback(e) => write!(f, "{}", e),
         }
     }
@@ -62,6 +64,12 @@ impl From<globber::Error> for ConfigError {
 impl From<pcre2::Error> for ConfigError {
     fn from(e: pcre2::Error) -> Self {
         ConfigError::Regex(e)
+    }
+}
+
+impl From<fs::cache::DirPathBufError> for ConfigError {
+    fn from(e: fs::cache::DirPathBufError) -> Self {
+        ConfigError::NotADirectory(e)
     }
 }
 
