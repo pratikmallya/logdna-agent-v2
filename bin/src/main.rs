@@ -7,9 +7,9 @@ use std::thread::spawn;
 use config::Config;
 use env_logger::Env;
 use fs::tail::Tailer as FSSource;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use http::client::Client;
-use journald::source::{JournaldStream, JournalPath};
+use journald::source::create_source;
 use k8s::middleware::K8sMetadata;
 use metrics::Metrics;
 use middleware::Executor;
@@ -63,21 +63,8 @@ fn main() {
 
     let mut fs_tailer_buf = [0u8; 4096];
     let mut fs_source = FSSource::new(config.log.dirs, config.log.rules);
-    let mut journal_files: Vec<PathBuf> = Vec::new();
-    let mut journal_directories: Vec<PathBuf> = Vec::new();
-    for path in config.journald.paths {
-        if path.is_dir() {
-            journal_directories.push(path);
-        } else if path.is_file() {
-            journal_files.push(path);
-        } else {
-            warn!("unable to monitor journald path \"{:?}\": path does not exist", path);
-        }
-    }
-    let mut journald_sources: Vec<JournaldStream> = journal_directories.into_iter().map(|dir| JournaldStream::new(JournalPath::Directory(dir))).collect();
-    if journal_files.len() > 0 {
-        journald_sources.push(JournaldStream::new(JournalPath::Files(journal_files)));
-    }
+
+    let journald_source = create_source(&config.journald.paths);
     // Create the runtime
     let mut rt = Runtime::new().unwrap();
 
@@ -86,8 +73,7 @@ fn main() {
         let fs_source = Either::Left(fs_source
             .process(&mut fs_tailer_buf)
             .expect("except Failed to create FS Tailer"));
-        let mut journald_source: futures::stream::SelectAll<<Vec<JournaldStream> as IntoIterator>::Item> = futures::stream::select_all(journald_sources);
-        let mut journald_source = Either::Right(journald_source);
+        let journald_source = Either::Right(journald_source);
         pin_mut!(fs_source);
         pin_mut!(journald_source);
 
