@@ -66,7 +66,7 @@ AWS_SHARED_CREDENTIALS_FILE=$(HOME)/.aws/credentials
 
 .PHONY:build
 build: ## Build the agent
-	$(RUST_COMMAND) "--env RUST_BACKTRACE=full" "cargo build"
+	$(RUST_COMMAND) "--env RUST_BACKTRACE=full" "cargo build --features \"journald\""
 
 .PHONY:build-release
 build-release: ## Build a release version of the agent

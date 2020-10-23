@@ -143,7 +143,7 @@ impl TryFrom<RawConfig> for Config {
         let mut info = "unknown".to_string();
         if let Ok(sys_info) = sys_info::linux_os_release() {
             info = format!(
-                "{}/{}",
+                "{} rv:{}",
                 sys_info.name.unwrap_or_else(|| "unknown".to_string()),
                 sys_info.version.unwrap_or_else(|| "unknown".to_string()),
             )
@@ -159,6 +159,7 @@ impl TryFrom<RawConfig> for Config {
 
         template_builder.user_agent(format!("{}/{} ({})", pkg_name, pkg_version, info));
 
+        println!("Got template builder: {:?}", template_builder.build());
         let http = HttpConfig {
             template: template_builder.build()?,
             timeout: Duration::from_millis(

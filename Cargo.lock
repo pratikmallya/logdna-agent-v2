@@ -28,7 +28,7 @@ version = "0.7.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b476ce7103678b0c6d3d395dbbae31d48ff910bd28be979ba5d48c6351131d0d"
 dependencies = [
- "memchr 2.3.3",
+ "memchr",
 ]
 
 [[package]]
@@ -71,7 +71,7 @@ dependencies = [
  "bytes 0.5.6",
  "flate2",
  "futures-core",
- "memchr 2.3.3",
+ "memchr",
  "pin-project-lite",
 ]
 
@@ -129,6 +129,12 @@ dependencies = [
  "arrayvec",
  "constant_time_eq",
 ]
+
+[[package]]
+name = "build-env"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e068f31938f954b695423ecaf756179597627d0828c0d3e48c0a722a8b23cf9e"
 
 [[package]]
 name = "bumpalo"
@@ -346,12 +352,12 @@ dependencies = [
 
 [[package]]
 name = "cstr-argument"
-version = "0.0.2"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "514570a4b719329df37f93448a70df2baac553020d0eb43a8dfa9c1f5ba7b658"
+checksum = "20bd4e8067c20c7c3a4dea759ef91d4b18418ddb5bd8837ef6e2f2f93ca7ccbb"
 dependencies = [
  "cfg-if",
- "memchr 1.0.2",
+ "memchr",
 ]
 
 [[package]]
@@ -469,7 +475,28 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1"
 dependencies = [
- "foreign-types-shared",
+ "foreign-types-shared 0.1.1",
+]
+
+[[package]]
+name = "foreign-types"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d737d9aa519fb7b749cbc3b962edcf310a8dd1f4b67c91c4f83975dbdd17d965"
+dependencies = [
+ "foreign-types-macros",
+ "foreign-types-shared 0.3.0",
+]
+
+[[package]]
+name = "foreign-types-macros"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63f713f8b2aa9e24fec85b0e290c56caee12e3b6ae0aeeda238a75b28251afd6"
+dependencies = [
+ "proc-macro2 1.0.24",
+ "quote 1.0.7",
+ "syn 1.0.45",
 ]
 
 [[package]]
@@ -477,6 +504,12 @@ name = "foreign-types-shared"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
+
+[[package]]
+name = "foreign-types-shared"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7684cf33bb7f28497939e8c7cf17e3e4e3b8d9a0080ffa4f8ae2f515442ee855"
 
 [[package]]
 name = "fs"
@@ -625,7 +658,7 @@ dependencies = [
  "futures-macro",
  "futures-sink",
  "futures-task",
- "memchr 2.3.3",
+ "memchr",
  "pin-project",
  "pin-utils",
  "proc-macro-hack",
@@ -1009,8 +1042,13 @@ dependencies = [
 name = "journald"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "futures 0.3.6",
+ "http 0.1.0",
  "log",
+ "mio",
  "systemd",
+ "tokio 0.2.22",
 ]
 
 [[package]]
@@ -1115,10 +1153,10 @@ checksum = "2448f6066e80e3bfc792e9c98bf705b4b0fc6e8ef5b43e5889aff0eaa9c58743"
 
 [[package]]
 name = "libsystemd-sys"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7b98458cd04a5c3aacba6f1a3a3c4b9abcb0ae4d66a055eee502e0d52dc226b"
+version = "0.7.0"
+source = "git+https://github.com/jmesmon/rust-systemd#944ff5914353ee8c284606a217539f4598964e63"
 dependencies = [
+ "build-env",
  "libc",
  "pkg-config",
 ]
@@ -1213,15 +1251,6 @@ name = "maybe-uninit"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60302e4db3a61da70c0cb7991976248362f30319e88850c487b9b95bbf059e00"
-
-[[package]]
-name = "memchr"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "148fab2e51b4f1cfc66da2a7c32981d1d3c083a803978268bb11fe4b86925e7a"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "memchr"
@@ -1403,7 +1432,7 @@ checksum = "8d575eff3665419f9b83678ff2815858ad9d11567e082f5ac1814baba4e2bcb4"
 dependencies = [
  "bitflags",
  "cfg-if",
- "foreign-types",
+ "foreign-types 0.3.2",
  "lazy_static",
  "libc",
  "openssl-sys",
@@ -1746,7 +1775,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8963b85b8ce3074fecffde43b4b0dded83ce2f367dc8d363afc56679f3ee820b"
 dependencies = [
  "aho-corasick",
- "memchr 2.3.3",
+ "memchr",
  "regex-syntax",
  "thread_local",
 ]
@@ -2163,14 +2192,15 @@ dependencies = [
 
 [[package]]
 name = "systemd"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "daf2fd2d346d2dfb5fdc5f47b355f60dcfc35f5ee3e89e64e7ae2849ec8792a5"
+version = "0.7.0"
+source = "git+https://github.com/jmesmon/rust-systemd#944ff5914353ee8c284606a217539f4598964e63"
 dependencies = [
  "cstr-argument",
+ "foreign-types 0.5.0",
  "libc",
  "libsystemd-sys",
  "log",
+ "memchr",
  "utf8-cstr",
 ]
 
@@ -2317,13 +2347,14 @@ dependencies = [
  "iovec",
  "lazy_static",
  "libc",
- "memchr 2.3.3",
+ "memchr",
  "mio",
  "mio-uds",
  "num_cpus",
  "pin-project-lite",
  "signal-hook-registry",
  "slab",
+ "tokio-macros",
  "winapi 0.3.9",
 ]
 
@@ -2389,6 +2420,17 @@ dependencies = [
  "bytes 0.4.12",
  "futures 0.1.30",
  "log",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0c3acc6aa564495a0f2e1d59fab677cd7f81a19994cfc7f3ad0e64301560389"
+dependencies = [
+ "proc-macro2 1.0.24",
+ "quote 1.0.7",
+ "syn 1.0.45",
 ]
 
 [[package]]

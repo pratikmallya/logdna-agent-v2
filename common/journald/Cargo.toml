@@ -5,8 +5,6 @@ authors = ["jakedipity <jacob.hull@logdna.com>"]
 edition = "2018"
 
 [dependencies]
-#local
-
 systemd = { git = "https://github.com/jmesmon/rust-systemd" }
 tokio = { package = "tokio", version = "0.2", features = ["sync", "rt-threaded", "macros"] }
 futures = "0.3"
