@@ -72,6 +72,10 @@ build: ## Build the agent
 build-release: ## Build a release version of the agent
 	$(RUST_COMMAND) "--env RUST_BACKTRACE=full" "cargo build --release && strip ./target/release/logdna-agent"
 
+.PHONY:check
+check: ## Run unit tests
+	$(RUST_COMMAND) "" "cargo check --all-targets"
+
 .PHONY:test
 test: ## Run unit tests
 	$(RUST_COMMAND) "--env RUST_BACKTRACE=full" "cargo test"
