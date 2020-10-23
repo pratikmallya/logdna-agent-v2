@@ -250,3 +250,137 @@ impl Tailer {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::rule::{GlobRule, Rules};
+    use crate::test::LOGGER;
+    use std::convert::TryInto;
+    use std::io::Write;
+    use std::panic;
+    use tempfile::tempdir;
+    use tokio::stream::StreamExt;
+
+    macro_rules! take_events {
+        ( $x:expr, $y: expr ) => {{
+            {
+                futures::StreamExt::collect::<Vec<_>>(futures::StreamExt::take($x, $y))
+            }
+        }};
+    }
+
+    fn run_test<T: FnOnce() + panic::UnwindSafe>(test: T) {
+        #![allow(unused_must_use, clippy::clone_on_copy)]
+        LOGGER.clone();
+        let result = panic::catch_unwind(|| {
+            test();
+        });
+
+        assert!(result.is_ok())
+    }
+
+    #[test]
+    fn end_lookback() {
+        run_test(|| {
+            tokio_test::block_on(async {
+                let mut rules = Rules::new();
+                rules.add_inclusion(GlobRule::new(r"**").unwrap());
+
+                let log_lines = "This is a test log line";
+                debug!("{}", log_lines.as_bytes().len());
+                let dir = tempdir().expect("Couldn't create temp dir...");
+
+                let file_path = dir.path().join("test.log");
+
+                let mut file = File::create(&file_path).expect("Couldn't create temp log file...");
+
+                (0..(8192 / (log_lines.as_bytes().len() + 1)) + 1).for_each(|_| {
+                    writeln!(file, "{}", log_lines).expect("Couldn't write to temp log file...")
+                });
+                file.sync_all().expect("Failed to sync file");
+
+                let mut tailer = Tailer::new(
+                    vec![dir
+                        .path()
+                        .try_into()
+                        .expect(&format!("{:?} is not a directory!", dir.path()))],
+                    rules,
+                    Lookback::None,
+                );
+                let mut buf = [0u8; 4096];
+
+                let stream = tailer
+                    .process(&mut buf)
+                    .expect("failed to read events")
+                    .timeout(std::time::Duration::from_millis(500));
+
+                let write_files = async move {
+                    tokio::time::delay_for(tokio::time::Duration::from_millis(500)).await;
+                    (0..1).for_each(|_| {
+                        writeln!(file, "{}", log_lines)
+                            .expect("Couldn't write to temp log file...");
+                        file.sync_all().expect("Failed to sync file");
+                    });
+                };
+                let (_, events) =
+                    futures::join!(tokio::spawn(write_files), take_events!(stream, 3));
+                let events = events.iter().flat_map(|x| x).collect::<Vec<_>>();
+                assert!(events.len() == 1);
+                debug!("{:?}, {:?}", events.len(), &events);
+            });
+        });
+    }
+
+    #[test]
+    fn start_lookback() {
+        run_test(|| {
+            tokio_test::block_on(async {
+                let mut rules = Rules::new();
+                rules.add_inclusion(GlobRule::new(r"**").unwrap());
+
+                let log_lines = "This is a test log line";
+                let dir = tempdir().expect("Couldn't create temp dir...");
+
+                let file_path = dir.path().join("test.log");
+
+                let mut file = File::create(&file_path).expect("Couldn't create temp log file...");
+                (0..10).for_each(|_| {
+                    writeln!(file, "{}", log_lines).expect("Couldn't write to temp log file...")
+                });
+                file.sync_all().expect("Failed to sync file");
+
+                let mut tailer = Tailer::new(
+                    vec![dir
+                        .path()
+                        .try_into()
+                        .expect(&format!("{:?} is not a directory!", dir.path()))],
+                    rules,
+                    Lookback::Start,
+                );
+
+                let mut buf = [0u8; 4096];
+
+                let stream = tailer
+                    .process(&mut buf)
+                    .expect("failed to read events")
+                    .timeout(std::time::Duration::from_millis(500));
+
+                let write_files = async move {
+                    tokio::time::delay_for(tokio::time::Duration::from_millis(500)).await;
+                    (0..5).for_each(|_| {
+                        writeln!(file, "{}", log_lines)
+                            .expect("Couldn't write to temp log file...");
+                        file.sync_all().expect("Failed to sync file");
+                    });
+                };
+                let (_, events) =
+                    futures::join!(tokio::spawn(write_files), take_events!(stream, 16));
+                let events = events.iter().flat_map(|x| x).collect::<Vec<_>>();
+                debug!("{:?}, {:?}", events.len(), &events);
+                assert!(events.len() == 15);
+                debug!("{:?}, {:?}", events.len(), &events);
+            })
+        })
+    }
+}

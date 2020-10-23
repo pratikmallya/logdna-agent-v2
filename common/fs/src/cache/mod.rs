@@ -896,6 +896,8 @@ fn append_rules(rules: &mut Rules, mut path: PathBuf) {
 mod tests {
     use super::*;
     use crate::rule::{GlobRule, Rules};
+    use crate::test::LOGGER;
+    use std::convert::TryInto;
     use std::fs::{copy, create_dir, hard_link, remove_dir_all, remove_file, rename, File};
     use std::os::unix::fs::symlink;
     use std::panic;
@@ -923,10 +925,6 @@ mod tests {
             let mut fs = $x.lock().expect("failed to lock fs");
             fs.lookup(&$y)
         }};
-    }
-
-    lazy_static! {
-        static ref LOGGER: () = env_logger::init();
     }
 
     fn new_fs<T: Default + Clone + std::fmt::Debug>(
@@ -1386,11 +1384,14 @@ mod tests {
     #[test]
     fn filesystem_move_dir_in() {
         run_test(|| {
-            let tempdir = TempDir::new().unwrap();
-            let path = tempdir.path().to_path_buf();
+            let old_tempdir = TempDir::new().unwrap();
+            let old_path = old_tempdir.path().to_path_buf();
 
-            let old_dir_path = path.join("old");
-            let new_dir_path = path.join("new");
+            let new_tempdir = TempDir::new().unwrap();
+            let new_path = new_tempdir.path().to_path_buf();
+
+            let old_dir_path = old_path.join("old");
+            let new_dir_path = new_path.join("new");
             let file_path = old_dir_path.join("file.log");
             let sym_path = old_dir_path.join("sym.log");
             let hard_path = old_dir_path.join("hard.log");
@@ -1399,7 +1400,7 @@ mod tests {
             symlink(&file_path, &sym_path).unwrap();
             hard_link(&file_path, &hard_path).unwrap();
 
-            let fs = Arc::new(Mutex::new(new_fs::<()>(new_dir_path.clone(), None)));
+            let fs = Arc::new(Mutex::new(new_fs::<()>(new_path.clone(), None)));
 
             assert!(lookup_entry!(fs, old_dir_path).is_none());
             assert!(lookup_entry!(fs, new_dir_path).is_none());
