@@ -5,10 +5,12 @@ authors = ["jakedipity <jacob.hull@logdna.com>"]
 edition = "2018"
 
 [dependencies]
+http = { package = "http", path = "../http" }
+metrics = { package = "metrics", path = "../metrics" }
+
 systemd = { git = "https://github.com/jmesmon/rust-systemd" }
 tokio = { package = "tokio", version = "0.2", features = ["sync", "rt-threaded", "macros"] }
 futures = "0.3"
 log = "0.4"
 mio = { version = "0.6" }
-http = { package = "http", path = "../http" }
 chrono = "0.4"

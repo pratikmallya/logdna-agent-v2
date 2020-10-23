@@ -1,9 +1,8 @@
 use systemd::journal::{Journal, JournalFiles, JournalRecord, JournalSeek};
 use chrono::{Local, TimeZone};
 use http::types::body::LineBuilder;
-
+use metrics::Metrics;
 use log::{warn};
-
 use futures::stream::Stream as FutureStream;
 use std::{
     mem::drop,
@@ -261,6 +260,8 @@ impl Reader {
             }
         };
 
+        Metrics::journald().increment_lines();
+        Metrics::journald().add_bytes(message.len() as u64);
         RecordStatus::Line(LineBuilder::new().line(
             format!(
                 "{} {} audit[{}]: {}",
@@ -307,6 +308,8 @@ impl Reader {
             }
         };
 
+        Metrics::journald().increment_lines();
+        Metrics::journald().add_bytes(message.len() as u64);
         RecordStatus::Line(LineBuilder::new().line(
             format!(
                 "{} {} {}[{}]: {}",
@@ -332,6 +335,8 @@ impl Reader {
             }
         };
 
+        Metrics::journald().increment_lines();
+        Metrics::journald().add_bytes(message.len() as u64);
         RecordStatus::Line(LineBuilder::new().line(
             format!("{} {} kernel: {}", timestamp, hostname, message)).file(hostname)
         )
