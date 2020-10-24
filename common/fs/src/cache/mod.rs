@@ -1018,7 +1018,7 @@ mod tests {
             vec![path
                 .as_path()
                 .try_into()
-                .expect(&format!("{:?} is not a directory!", path))],
+                .unwrap_or_else(|_| panic!("{:?} is not a directory!", path))],
             rules,
         )
     }
@@ -1484,7 +1484,7 @@ mod tests {
             symlink(&file_path, &sym_path).unwrap();
             hard_link(&file_path, &hard_path).unwrap();
 
-            let fs = Arc::new(Mutex::new(new_fs::<()>(new_path.clone(), None)));
+            let fs = Arc::new(Mutex::new(new_fs::<()>(new_path, None)));
 
             assert!(lookup_entry!(fs, old_dir_path).is_none());
             assert!(lookup_entry!(fs, new_dir_path).is_none());

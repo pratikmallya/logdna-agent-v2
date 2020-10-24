@@ -316,7 +316,7 @@ mod test {
                     vec![dir
                         .path()
                         .try_into()
-                        .expect(&format!("{:?} is not a directory!", dir.path()))],
+                        .unwrap_or_else(|_| panic!("{:?} is not a directory!", dir.path()))],
                     rules,
                     Lookback::None,
                 );
@@ -337,7 +337,7 @@ mod test {
                 };
                 let (_, events) =
                     futures::join!(tokio::spawn(write_files), take_events!(stream, 3));
-                let events = events.iter().flat_map(|x| x).collect::<Vec<_>>();
+                let events = events.iter().flatten().collect::<Vec<_>>();
                 assert!(events.len() == 1);
                 debug!("{:?}, {:?}", events.len(), &events);
             });
@@ -366,7 +366,7 @@ mod test {
                     vec![dir
                         .path()
                         .try_into()
-                        .expect(&format!("{:?} is not a directory!", dir.path()))],
+                        .unwrap_or_else(|_| panic!("{:?} is not a directory!", dir.path()))],
                     rules,
                     Lookback::Start,
                 );
@@ -388,7 +388,7 @@ mod test {
                 };
                 let (_, events) =
                     futures::join!(tokio::spawn(write_files), take_events!(stream, 16));
-                let events = events.iter().flat_map(|x| x).collect::<Vec<_>>();
+                let events = events.iter().flatten().collect::<Vec<_>>();
                 debug!("{:?}, {:?}", events.len(), &events);
                 assert!(events.len() == 15);
                 debug!("{:?}, {:?}", events.len(), &events);
