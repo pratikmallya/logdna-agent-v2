@@ -25,7 +25,7 @@ DOCKER_PUBLIC_IMAGE := docker.io/logdna/logdna-agent
 DOCKER_IBM_IMAGE := icr.io/ext/logdna-agent
 
 export CARGO_CACHE ?= $(shell pwd)/.cargo_cache
-RUST_COMMAND := $(DOCKER_DISPATCH) $(RUST_IMAGE)
+RUST_COMMAND = $(DOCKER_DISPATCH) $(RUST_IMAGE)
 HADOLINT_COMMAND := $(DOCKER_DISPATCH) $(HADOLINT_IMAGE)
 SHELLCHECK_COMMAND := $(DOCKER_DISPATCH) $(SHELLCHECK_IMAGE)
 
@@ -78,7 +78,7 @@ check: ## Run unit tests
 
 .PHONY:test
 test: ## Run unit tests
-	$(RUST_COMMAND) "--env RUST_BACKTRACE=full" "cargo test"
+	$(RUST_COMMAND) "--env RUST_BACKTRACE=full" "cargo test --no-run && cargo test -p logdna-agent"
 
 .PHONY:integration-test
 integration-test: ## Run integration tests
@@ -86,7 +86,7 @@ integration-test: ## Run integration tests
 
 .PHONY:clean
 clean: ## Clean all artifacts from the build process
-	$(RUST_COMMAND) "--env RUST_BACKTRACE=full" "rm -fr target/* \$$CARGO_HOME/registry/* \$$CARGO_HOME/git/*"
+	$(RUST_COMMAND) "" "rm -fr target/* \$$CARGO_HOME/registry/* \$$CARGO_HOME/git/*"
 
 .PHONY:clean-docker
 clean-docker: ## Cleans the intermediate and final agent images left over from the build-image target

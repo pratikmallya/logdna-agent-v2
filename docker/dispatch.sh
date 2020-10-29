@@ -7,9 +7,9 @@ _term() {
   exit "$status"
 }
 
-case "$(uname)" in
-	Darwin*)	HOST_MACHINE=Mac;;
-	*)		HOST_MACHINE=Linux;;
+case "$(docker info | grep -E '^\s*Name' | awk '{ print $2 }')" in
+	docker-desktop*) HOST_MACHINE=Mac;;
+	*)  HOST_MACHINE=Linux;;
 esac
 
 # Get the container's CARGO_HOME ENV, defaulting to /usr/local/cargo

@@ -57,7 +57,6 @@ impl Tailer {
         &mut self,
         buf: &'a mut [u8],
     ) -> Result<impl Stream<Item = Vec<LineBuilder>> + 'a, std::io::Error> {
-        // let mut buf = [0u8; 4096];
         let events = {
             match FileSystem::stream_events(self.fs_cache.clone(), buf) {
                 Ok(event) => event,
