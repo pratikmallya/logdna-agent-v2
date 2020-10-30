@@ -14,6 +14,7 @@ use rcgen::generate_simple_self_signed;
 use rustls::internal::pemfile;
 
 #[test]
+#[cfg_attr(not(feature = "integration_tests"), ignore)]
 fn api_key_missing() {
     let mut cmd = Command::cargo_bin("logdna-agent").unwrap();
     cmd.env_clear()
@@ -124,6 +125,7 @@ fn api_key_present() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "integration_tests"), ignore)]
 fn lookback_start_lines_are_delivered() {
     let _ = env_logger::Builder::from_default_env().try_init();
     let subject_alt_names = vec!["logdna.com".to_string(), "localhost".to_string()];
@@ -219,6 +221,7 @@ fn lookback_start_lines_are_delivered() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "integration_tests"), ignore)]
 fn lookback_none_lines_are_delivered() {
     let _ = env_logger::Builder::from_default_env().try_init();
 
