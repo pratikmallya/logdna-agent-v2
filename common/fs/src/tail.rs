@@ -306,7 +306,8 @@ mod test {
 
                 let mut file = File::create(&file_path).expect("Couldn't create temp log file...");
 
-                (0..(8192 / (log_lines.as_bytes().len() + 1)) + 1).for_each(|_| {
+                let line_write_count = (8192 / (log_lines.as_bytes().len() + 1)) + 1;
+                (0..line_write_count).for_each(|_| {
                     writeln!(file, "{}", log_lines).expect("Couldn't write to temp log file...")
                 });
                 file.sync_all().expect("Failed to sync file");
@@ -337,7 +338,7 @@ mod test {
                 let (_, events) =
                     futures::join!(tokio::spawn(write_files), take_events!(stream, 3));
                 let events = events.iter().flatten().collect::<Vec<_>>();
-                assert!(events.len() == 1);
+                assert_eq!(events.len(), 1);
                 debug!("{:?}, {:?}", events.len(), &events);
             });
         });
@@ -356,7 +357,8 @@ mod test {
                 let file_path = dir.path().join("test.log");
 
                 let mut file = File::create(&file_path).expect("Couldn't create temp log file...");
-                (0..10).for_each(|_| {
+                let line_write_count = (8192 / (log_lines.as_bytes().len() + 1)) + 1;
+                (0..line_write_count).for_each(|_| {
                     writeln!(file, "{}", log_lines).expect("Couldn't write to temp log file...")
                 });
                 file.sync_all().expect("Failed to sync file");
@@ -386,10 +388,10 @@ mod test {
                     });
                 };
                 let (_, events) =
-                    futures::join!(tokio::spawn(write_files), take_events!(stream, 16));
+                    futures::join!(tokio::spawn(write_files), take_events!(stream, line_write_count + 5 + 1));
                 let events = events.iter().flatten().collect::<Vec<_>>();
                 debug!("{:?}, {:?}", events.len(), &events);
-                assert!(events.len() == 15);
+                assert_eq!(events.len(), line_write_count + 5);
                 debug!("{:?}, {:?}", events.len(), &events);
             })
         })
